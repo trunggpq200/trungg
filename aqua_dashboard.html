@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bể nuôi thủy sản</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mqtt@4.3.7/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #E3EEEA;
+    --card: #FFFFFF;
+    --ink: #0F2E35;
+    --soft: #4F6A70;
+    --line: #C4D6D1;
+    --water: #2B8CA3;
+    --water-deep: #1A6378;
+    --pump: #EE8434;
+    --valve: #7D5BD0;
+    --alert: #D64545;
+    --ok: #2E8B6E;
+    --font: "Nunito", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.5 var(--font); }
+  .page { max-width: 1260px; margin: 0 auto; padding: 26px 24px 40px; }
+
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .top h1 { margin: 0; font-size: clamp(30px, 4vw, 42px); font-weight: 900; letter-spacing: -0.01em; line-height: 1.05; }
+  .top p { margin: 4px 0 0; color: var(--soft); }
+  .link { display: inline-flex; align-items: center; gap: 10px; padding: 9px 16px; border-radius: 999px; background: var(--card); font-weight: 700; font-size: 14px; }
+  .link i { width: 10px; height: 10px; border-radius: 50%; background: var(--soft); }
+  .link[data-state="ok"] i { background: var(--ok); }
+  .link[data-state="wait"] i { background: var(--pump); }
+  .link[data-state="off"] i { background: var(--alert); }
+
+  /* Mặt cắt bể: điểm nhấn chính */
+  .hero { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr); gap: 20px; align-items: stretch; }
+  .tank-card { background: var(--card); border-radius: 28px; padding: 18px 18px 10px; }
+  .tank-card svg { width: 100%; height: auto; display: block; }
+  .flow { stroke-dasharray: 10 12; animation: flow 0.8s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -22; } }
+  .water-rect, .level-g { transition: transform .8s cubic-bezier(.3,.7,.3,1), y .8s, height .8s; }
+
+  .side { display: grid; gap: 16px; align-content: start; }
+  .panel { background: var(--card); border-radius: 22px; padding: 20px 22px; }
+  .panel h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--soft); }
+  .level-big { display: flex; align-items: baseline; gap: 8px; margin-top: 2px; }
+  .level-big .value-level { font-size: 72px; font-weight: 900; line-height: 1; color: var(--water-deep); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .level-big span.unit { font-size: 26px; font-weight: 800; color: var(--water); }
+  .dist { margin: 6px 0 0; color: var(--soft); font-size: 14px; }
+  .action { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: #EEF4F2; display: flex; align-items: center; gap: 12px; }
+  .action b { display: block; font-size: 17px; }
+  .action small { color: var(--soft); font-size: 13px; }
+  .action .dot { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--line); }
+  .action[data-kind="pump"] { background: #FDEBDD; } .action[data-kind="pump"] .dot { background: var(--pump); }
+  .action[data-kind="drain"] { background: #ECE6FA; } .action[data-kind="drain"] .dot { background: var(--valve); }
+  .action[data-kind="manual"] { background: #E1E8EA; } .action[data-kind="manual"] .dot { background: var(--ink); }
+  .bar { height: 6px; border-radius: 3px; background: rgba(15,46,53,.12); margin-top: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--ink); border-radius: 3px; transition: width .9s linear; }
+
+  .temp-row { display: flex; align-items: baseline; gap: 6px; }
+  .temp-row .value-temp { font-size: 52px; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .temp-row span.unit { font-size: 22px; font-weight: 800; color: var(--soft); }
+  .range { position: relative; height: 12px; border-radius: 6px; margin: 12px 0 4px;
+    background: linear-gradient(90deg, #7FB3D5 0 25%, #8FD3B6 25% 75%, #F2A48A 75% 100%); }
+  .range i { position: absolute; top: -5px; width: 4px; height: 22px; border-radius: 2px; background: var(--ink); transform: translateX(-2px); transition: left .6s ease; }
+  .range-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--soft); }
+  .temp-note { margin: 8px 0 0; font-size: 14px; font-weight: 700; }
+
+  /* Biểu đồ */
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+  .chart { background: var(--card); border-radius: 22px; padding: 18px 18px 10px; }
+  .chart h2 { margin: 0; font-size: 18px; font-weight: 800; }
+  .chart p { margin: 2px 0 8px; font-size: 13px; color: var(--soft); }
+  .chart-box { position: relative; height: 230px; }
+
+  /* Điều khiển */
+  .control { margin-top: 20px; background: var(--water-deep); color: #EAF5F7; border-radius: 26px; padding: 22px 24px; display: grid; grid-template-columns: 1.4fr 1fr auto; gap: 16px; align-items: stretch; }
+  .ctl { background: rgba(255,255,255,.08); border-radius: 18px; padding: 14px 16px; }
+  .ctl h3 { margin: 0 0 10px; font-size: 18px; font-weight: 800; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .ctl h3 small { font-size: 14px; font-weight: 600; color: #B9D9E0; }
+  .seg { display: flex; gap: 8px; }
+  .seg button, .tog, .auto {
+    font: 800 16px var(--font); border: 0; cursor: pointer; border-radius: 12px; padding: 12px 16px;
+    background: rgba(255,255,255,.14); color: #EAF5F7; flex: 1;
+  }
+  .seg button[aria-pressed="true"] { background: var(--pump); color: #2A1405; }
+  .tog[aria-pressed="true"] { background: var(--valve); color: #FFFFFF; }
+  .tog { width: 100%; }
+  .auto { background: #EAF5F7; color: var(--water-deep); padding: 12px 22px; flex: none; }
+  .seg button:disabled, .tog:disabled, .auto:disabled { opacity: .45; cursor: not-allowed; }
+  .seg button:focus-visible, .tog:focus-visible, .auto:focus-visible { outline: 3px solid var(--pump); outline-offset: 2px; }
+  .mode { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .mode strong { font-size: 20px; font-weight: 900; }
+  .ack { grid-column: 1 / -1; margin: 0; padding: 10px 14px; border-radius: 12px; background: rgba(255,255,255,.1); font-weight: 600; }
+  .ack[data-kind="ok"] { background: rgba(46,139,110,.55); }
+  .ack[data-kind="wait"] { background: rgba(238,132,52,.45); }
+  .ack[data-kind="bad"] { background: rgba(214,69,69,.6); }
+  .note { grid-column: 1 / -1; margin: 0; font-size: 13px; color: #B9D9E0; }
+
+  /* Thuật toán và nhật ký */
+  .bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+  .bottom h2 { margin: 0 0 8px; font-size: 18px; font-weight: 800; }
+  .rules, .log { list-style: none; margin: 0; padding: 0; }
+  .rules li, .log li { display: grid; grid-template-columns: 110px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .rules li b { font-variant-numeric: tabular-nums; }
+  .rules li.on { font-weight: 800; color: var(--water-deep); }
+  .log li { grid-template-columns: 84px 12px 1fr; align-items: center; }
+  .log time { color: var(--soft); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .log i { width: 10px; height: 10px; border-radius: 50%; background: var(--soft); }
+  .log li.pump i { background: var(--pump); } .log li.drain i { background: var(--valve); } .log li.alert i { background: var(--alert); }
+  .foot { margin-top: 22px; font-size: 13px; color: var(--soft); }
+
+  @media (max-width: 980px) {
+    .hero, .charts, .bottom { grid-template-columns: 1fr; }
+    .control { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .flow { animation: none; }
+    .water-rect, .level-g, .bar i, .range i { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="top">
+    <div>
+      <h1>Bể nuôi thủy sản</h1>
+      <p>Mực nước và nhiệt độ đo bởi ESP32, cập nhật mỗi giây qua MQTT</p>
+    </div>
+    <div class="link" id="link" data-state="wait" role="status" aria-live="polite"><i></i><span id="linkText">Đang kết nối broker...</span></div>
+  </header>
+
+  <section class="hero">
+    <div class="tank-card">
+      <svg viewBox="0 0 600 470" role="img" aria-label="Mặt cắt bể nuôi và mực nước hiện tại">
+        <defs>
+          <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#3FA3BA"/><stop offset="1" stop-color="#1A6378"/>
+          </linearGradient>
+          <clipPath id="tankClip"><rect x="110" y="60" width="330" height="375" rx="6"/></clipPath>
+        </defs>
+        <!-- Vùng thuật toán trên thành bể (thang 0..2,5 m: 150 px/m, đáy ở y=435) -->
+        <rect x="446" y="360" width="14" height="75" fill="#7D5BD0" opacity=".85"/>
+        <rect x="446" y="210" width="14" height="75" fill="#EE8434" opacity=".55"/>
+        <rect x="446" y="135" width="14" height="75" fill="#EE8434" opacity=".95"/>
+        <g font-family="Nunito, sans-serif" font-size="14" font-weight="700" fill="#0F2E35">
+          <text x="468" y="402">Xả 10 s</text>
+          <text x="468" y="252">Bơm 50%, 10 s</text>
+          <text x="468" y="177">Bơm 100%, 20 s</text>
+        </g>
+        <g font-family="Nunito, sans-serif" font-size="13" fill="#4F6A70" text-anchor="end">
+          <text x="100" y="439">0 m</text><text x="100" y="364">0,5</text><text x="100" y="289">1,0</text>
+          <text x="100" y="214">1,5</text><text x="100" y="139">2,0</text><text x="100" y="64">2,5</text>
+        </g>
+        <g stroke="#C4D6D1" stroke-width="1.5">
+          <line x1="104" y1="360" x2="110" y2="360"/><line x1="104" y1="285" x2="110" y2="285"/>
+          <line x1="104" y1="210" x2="110" y2="210"/><line x1="104" y1="135" x2="110" y2="135"/>
+        </g>
+        <!-- Nước -->
+        <g clip-path="url(#tankClip)">
+          <rect x="110" y="60" width="330" height="375" fill="#F2F7F6"/>
+          <rect class="water-rect" id="water" x="110" y="435" width="330" height="0" fill="url(#wg)"/>
+          <g stroke="#C4D6D1" stroke-dasharray="4 6" stroke-width="1">
+            <line x1="110" y1="360" x2="440" y2="360"/><line x1="110" y1="285" x2="440" y2="285"/>
+            <line x1="110" y1="210" x2="440" y2="210"/><line x1="110" y1="135" x2="440" y2="135"/>
+          </g>
+        </g>
+        <!-- Thành bể -->
+        <path d="M110 40 V435 H440 V40" fill="none" stroke="#0F2E35" stroke-width="6" stroke-linejoin="round"/>
+        <!-- Cảm biến trên nắp và tia đo -->
+        <rect x="248" y="22" width="54" height="22" rx="5" fill="#0F2E35"/>
+        <circle cx="262" cy="33" r="6" fill="#E3EEEA"/><circle cx="288" cy="33" r="6" fill="#E3EEEA"/>
+        <line id="beam" x1="275" y1="46" x2="275" y2="435" stroke="#0F2E35" stroke-width="2" stroke-dasharray="3 6" opacity=".5"/>
+        <g id="beamLabel" font-family="Nunito, sans-serif" font-size="14" font-weight="700" fill="#0F2E35">
+          <text id="beamText" x="284" y="80">-- cm</text>
+        </g>
+        <!-- Ống bơm vào (trái, trên) -->
+        <path d="M20 30 H150 V120" fill="none" stroke="#C4D6D1" stroke-width="14" stroke-linecap="round"/>
+        <path id="pumpFlow" class="flow" d="M20 30 H150 V120" fill="none" stroke="#EE8434" stroke-width="6" stroke-linecap="round" opacity="0"/>
+        <text x="20" y="16" font-family="Nunito, sans-serif" font-size="14" font-weight="800" fill="#0F2E35">Bơm vào <tspan id="pumpTxt">tắt</tspan></text>
+        <!-- Ống xả ra (phải, dưới) -->
+        <path d="M400 435 V455 H585" fill="none" stroke="#C4D6D1" stroke-width="14" stroke-linecap="round"/>
+        <path id="valveFlow" class="flow" d="M400 435 V455 H585" fill="none" stroke="#7D5BD0" stroke-width="6" stroke-linecap="round" opacity="0"/>
+        <text x="470" y="445" font-family="Nunito, sans-serif" font-size="14" font-weight="800" fill="#0F2E35">Van xả <tspan id="valveTxt">đóng</tspan></text>
+        <!-- Vạch mực nước -->
+        <g class="level-g" id="levelMark">
+          <line x1="110" y1="0" x2="440" y2="0" stroke="#FFFFFF" stroke-width="3"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>Mực nước</h2>
+        <div class="level-big"><span class="value-level" id="level">-,--</span><span class="unit">m</span></div>
+        <p class="dist">Cảm biến cách mặt nước <span class="value-dist">--</span> cm, bể cao 2,5 m</p>
+        <div class="action" id="action" data-kind="none">
+          <span class="dot"></span>
+          <div style="flex:1">
+            <b id="actionTitle">Chờ dữ liệu</b>
+            <small id="actionSub">Trang đang chờ bản tin đầu tiên từ ESP32.</small>
+            <div class="bar"><i id="actionBar"></i></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Nhiệt độ bể</h2>
+        <div class="temp-row"><span class="value-temp" id="temp">--,-</span><span class="unit">°C</span></div>
+        <div class="range" aria-hidden="true"><i id="tempMark" style="left:50%"></i></div>
+        <div class="range-labels"><span>15 °C</span><span>24</span><span>32</span><span>41 °C</span></div>
+        <p class="temp-note" id="tempNote">Khoảng phù hợp 24 đến 32 °C</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="charts">
+    <div class="chart">
+      <h2>Mực nước theo thời gian</h2>
+      <p>60 giây gần nhất; đường đứt là các mốc 0,5, 1,0, 1,5 và 2,0 m</p>
+      <div class="chart-box"><canvas id="levelChart" aria-label="Biểu đồ mực nước"></canvas></div>
+    </div>
+    <div class="chart">
+      <h2>Nhiệt độ bể theo thời gian</h2>
+      <p>60 giây gần nhất; đường đứt là khoảng phù hợp 24 đến 32 °C</p>
+      <div class="chart-box"><canvas id="tempChart" aria-label="Biểu đồ nhiệt độ"></canvas></div>
+    </div>
+  </section>
+
+  <section class="control" aria-label="Điều khiển máy bơm và van">
+    <div class="mode"><span>Chế độ hiện tại: <strong id="modeText">Tự động</strong></span><span id="modeLeft"></span></div>
+    <div class="ctl">
+      <h3>Máy bơm nước vào <small id="pumpState">Đang tắt</small></h3>
+      <div class="seg" role="group" aria-label="Công suất máy bơm">
+        <button id="pumpOff" aria-pressed="true" disabled>Tắt</button>
+        <button id="pump50" aria-pressed="false" disabled>50%</button>
+        <button id="pump100" aria-pressed="false" disabled>100%</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <h3>Van thoát nước ra <small id="valveState">Đang đóng</small></h3>
+      <button class="tog" id="valveBtn" aria-pressed="false" disabled>Mở van</button>
+    </div>
+    <button class="auto" id="autoBtn" disabled>Về tự động</button>
+    <p class="ack" id="ack" role="status" aria-live="polite">Bấm nút để chuyển sang thủ công; dòng này báo ESP32 đã làm theo hay chưa.</p>
+    <p class="note">Bật bơm thì van tự đóng và ngược lại. Thủ công tự hết sau 30 giây, sau đó bể quay lại chạy theo thuật toán mực nước.</p>
+  </section>
+
+  <section class="bottom">
+    <div class="panel">
+      <h2>Thuật toán mực nước</h2>
+      <ul class="rules" id="rules">
+        <li data-band="0"><b>Dưới 0,5 m</b><span>Mở van thoát trong 10 giây</span></li>
+        <li data-band="1"><b>0,5 đến 1,0 m</b><span>Không làm gì</span></li>
+        <li data-band="2"><b>1,0 đến 1,5 m</b><span>Bơm 50% công suất trong 10 giây</span></li>
+        <li data-band="3"><b>1,5 đến 2,0 m</b><span>Bơm 100% công suất trong 20 giây</span></li>
+        <li data-band="4"><b>Trên 2,0 m</b><span>Không làm gì</span></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>Nhật ký</h2>
+      <ol class="log" id="events"><li class="empty"><time></time><i></i><span>Chưa có sự kiện nào.</span></li></ol>
+    </div>
+  </section>
+
+  <p class="foot" id="foot">Topic dữ liệu: lab3/aquatank/data. Topic lệnh: lab3/aquatank/cmd.</p>
+</div>
+
+<script>
+  // Các thông số này phải trùng với firmware ESP32.
+  const BROKER_URL = "wss://broker.emqx.io:8084/mqtt";
+  const TOPIC_DATA = "lab3/aquatank/data";
+  const TOPIC_CMD  = "lab3/aquatank/cmd";
+  const MAX_POINTS = 60;
+  const TANK_M = 2.5;
+  const TEMP_MIN = 24, TEMP_MAX = 32;
+
+  const $ = (id) => document.getElementById(id);
+  // Số đo hiển thị trên các thẻ HTML có class (theo yêu cầu đề bài)
+  const setByClass = (cls, text) => document.querySelectorAll("." + cls).forEach((el) => { el.textContent = text; });
+  const fmt = (v, n) => v.toFixed(n).replace(".", ",");
+  const state = { pump: 0, valve: false, mode: "auto", action: "none", maxLeft: 1 };
+  let lastMsg = 0, pending = null, lastAction = null, lastAlert = null;
+
+  // ---- Biểu đồ ----
+  const thresholds = {
+    id: "thresholds",
+    afterDatasetsDraw(chart, args, opts) {
+      if (!opts.values) return;
+      const { ctx, chartArea, scales } = chart;
+      ctx.save(); ctx.setLineDash([6, 6]); ctx.lineWidth = 1.4; ctx.strokeStyle = "rgba(15,46,53,.45)";
+      opts.values.forEach((v) => {
+        const y = scales.y.getPixelForValue(v);
+        if (y < chartArea.top || y > chartArea.bottom) return;
+        ctx.beginPath(); ctx.moveTo(chartArea.left, y); ctx.lineTo(chartArea.right, y); ctx.stroke();
+      });
+      ctx.restore();
+    },
+  };
+  function makeChart(id, color, values, range) {
+    return new Chart($(id).getContext("2d"), {
+      type: "line", plugins: [thresholds],
+      data: { labels: [], datasets: [{ data: [], borderColor: color, backgroundColor: color + "26", fill: true, borderWidth: 2.6, pointRadius: 0, tension: 0.3, spanGaps: true }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { intersect: false, mode: "index" },
+        plugins: { legend: { display: false }, thresholds: { values }, tooltip: { backgroundColor: "#0F2E35", displayColors: false } },
+        scales: {
+          x: { ticks: { color: "#4F6A70", maxTicksLimit: 6, maxRotation: 0 }, grid: { display: false } },
+          y: { suggestedMin: range[0], suggestedMax: range[1], ticks: { color: "#4F6A70", maxTicksLimit: 6 }, grid: { color: "#E3ECE9" }, border: { display: false } },
+        },
+      },
+    });
+  }
+  const levelChart = makeChart("levelChart", "#2B8CA3", [0.5, 1, 1.5, 2], [0, 2.5]);
+  const tempChart = makeChart("tempChart", "#EE8434", [TEMP_MIN, TEMP_MAX], [20, 35]);
+  function addPoint(chart, label, value) {
+    chart.data.labels.push(label); chart.data.datasets[0].data.push(value);
+    if (chart.data.labels.length > MAX_POINTS) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+    chart.update("none");
+  }
+
+  // ---- Nhật ký ----
+  function addEvent(cls, text) {
+    const list = $("events");
+    const empty = list.querySelector(".empty");
+    if (empty) empty.remove();
+    const li = document.createElement("li");
+    li.className = cls;
+    li.innerHTML = "<time></time><i></i><span></span>";
+    li.querySelector("time").textContent = new Date().toLocaleTimeString("vi-VN");
+    li.querySelector("span").textContent = text;
+    list.prepend(li);
+    while (list.children.length > 8) list.lastElementChild.remove();
+  }
+
+  // ---- Hiển thị ----
+  const ACTIONS = {
+    none:    ["none",   "Không có lượt chạy nào", "Bể đang ở trạng thái chờ theo thuật toán mực nước."],
+    pump50:  ["pump",   "Đang bơm vào 50%",        "Mực nước trong vùng 1,0 đến 1,5 m."],
+    pump100: ["pump",   "Đang bơm vào 100%",       "Mực nước trong vùng 1,5 đến 2,0 m."],
+    drain:   ["drain",  "Đang mở van thoát",       "Mực nước dưới 0,5 m."],
+    manual:  ["manual", "Điều khiển thủ công",     "Bơm và van đang theo lệnh từ trang này."],
+  };
+  function band(level) { return level < 0.5 ? 0 : level < 1 ? 1 : level < 1.5 ? 2 : level <= 2 ? 3 : 4; }
+
+  function render(d) {
+    const level = Number(d.level), dist = Number(d.dist);
+    const temp = d.temp === null ? NaN : Number(d.temp);
+    const time = new Date().toLocaleTimeString("vi-VN");
+
+    if (Number.isFinite(level)) {
+      setByClass("value-level", fmt(level, 2));
+      const h = Math.max(0, Math.min(TANK_M, level)) * 150;
+      $("water").setAttribute("y", (435 - h).toFixed(1));
+      $("water").setAttribute("height", h.toFixed(1));
+      $("levelMark").setAttribute("transform", "translate(0 " + (435 - h).toFixed(1) + ")");
+      $("beam").setAttribute("y2", (435 - h).toFixed(1));
+      $("beamText").setAttribute("y", Math.max(80, (60 + (375 - h) / 2)).toFixed(0));
+      document.querySelectorAll("#rules li").forEach((li) => li.classList.toggle("on", Number(li.dataset.band) === band(level)));
+      addPoint(levelChart, time, level);
+    }
+    if (Number.isFinite(dist)) { setByClass("value-dist", fmt(dist, 1)); $("beamText").textContent = fmt(dist, 0) + " cm"; }
+    if (Number.isFinite(temp)) {
+      setByClass("value-temp", fmt(temp, 1));
+      $("tempMark").style.left = Math.max(0, Math.min(100, (temp - 15) / 26 * 100)) + "%";
+      addPoint(tempChart, time, temp);
+    } else {
+      setByClass("value-temp", "--,-");
+    }
+    const alert = String(d.alert || "none");
+    $("tempNote").textContent = alert === "temp_high" ? "Nước quá nóng, trên 32 °C" : alert === "temp_low" ? "Nước quá lạnh, dưới 24 °C" : alert === "sensor_error" ? "Không đọc được cảm biến nhiệt độ" : "Khoảng phù hợp 24 đến 32 °C";
+    $("tempNote").style.color = alert === "none" ? "var(--ok)" : "var(--alert)";
+    if (alert !== lastAlert) { if (lastAlert !== null && alert !== "none") addEvent("alert", $("tempNote").textContent); lastAlert = alert; }
+
+    // Bơm, van, lượt chạy
+    state.pump = Number(d.pump) || 0; state.valve = Number(d.valve) === 1; state.mode = String(d.mode || "auto");
+    const action = String(d.action || "none"), left = Number(d.left) || 0;
+    const a = ACTIONS[action] || ACTIONS.none;
+    if (action !== lastAction) { state.maxLeft = Math.max(1, left); if (lastAction !== null && action !== "none") addEvent(a[0], a[1] + (left ? ", " + left + " giây" : "")); lastAction = action; }
+    $("action").dataset.kind = a[0];
+    $("actionTitle").textContent = a[1] + (left ? ", còn " + left + " giây" : "");
+    $("actionSub").textContent = a[2];
+    $("actionBar").style.width = (left ? (left / state.maxLeft) * 100 : 0) + "%";
+
+    $("pumpFlow").style.opacity = state.pump ? (state.pump >= 100 ? 1 : 0.55) : 0;
+    $("valveFlow").style.opacity = state.valve ? 1 : 0;
+    $("pumpTxt").textContent = state.pump ? state.pump + "%" : "tắt";
+    $("valveTxt").textContent = state.valve ? "mở" : "đóng";
+    $("pumpState").textContent = state.pump ? "Đang chạy " + state.pump + "%" : "Đang tắt";
+    $("valveState").textContent = state.valve ? "Đang mở" : "Đang đóng";
+    $("pumpOff").setAttribute("aria-pressed", String(state.pump === 0));
+    $("pump50").setAttribute("aria-pressed", String(state.pump === 50));
+    $("pump100").setAttribute("aria-pressed", String(state.pump === 100));
+    $("valveBtn").setAttribute("aria-pressed", String(state.valve));
+    $("valveBtn").textContent = state.valve ? "Đóng van" : "Mở van";
+    $("modeText").textContent = state.mode === "manual" ? "Thủ công" : "Tự động";
+    $("modeLeft").textContent = state.mode === "manual" && left ? "Tự về tự động sau " + left + " giây" : "";
+
+    if (pending && pending.check(d)) {
+      setAck("ok", "ESP32 đã làm theo lệnh " + pending.cmd + " sau " + fmt((Date.now() - pending.at) / 1000, 1) + " giây.");
+      pending = null;
+    }
+    $("foot").textContent = "Cập nhật lúc " + time + ". Topic dữ liệu: " + TOPIC_DATA + ". Topic lệnh: " + TOPIC_CMD + ".";
+  }
+
+  // ---- MQTT ----
+  function setLink(kind, text) { $("link").dataset.state = kind; $("linkText").textContent = text; }
+  function setAck(kind, text) { $("ack").dataset.kind = kind; $("ack").textContent = text; }
+  const BTNS = ["pumpOff", "pump50", "pump100", "valveBtn", "autoBtn"];
+  function setButtons(on) { BTNS.forEach((id) => { $(id).disabled = !on; }); }
+
+  const client = mqtt.connect(BROKER_URL, { clientId: "aqua-web-" + Math.random().toString(16).slice(2, 10), reconnectPeriod: 2000, connectTimeout: 8000, clean: true });
+  client.on("connect", () => { setLink("ok", "Đã kết nối broker"); client.subscribe(TOPIC_DATA, { qos: 0 }); setButtons(true); });
+  client.on("reconnect", () => { setLink("wait", "Đang kết nối lại broker..."); setButtons(false); });
+  client.on("offline", () => { setLink("off", "Mất kết nối broker"); setButtons(false); });
+  client.on("error", (err) => { setLink("off", "Lỗi kết nối: " + err.message); setButtons(false); });
+  client.on("message", (topic, payload) => {
+    if (topic !== TOPIC_DATA) return;
+    let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+    lastMsg = Date.now(); render(d);
+  });
+
+  const CHECK = {
+    pump_on:   (d) => d.mode === "manual" && Number(d.pump) === 100,
+    pump_50:   (d) => d.mode === "manual" && Number(d.pump) === 50,
+    pump_off:  (d) => d.mode === "manual" && Number(d.pump) === 0,
+    valve_on:  (d) => d.mode === "manual" && Number(d.valve) === 1,
+    valve_off: (d) => d.mode === "manual" && Number(d.valve) === 0,
+    auto:      (d) => d.mode === "auto",
+  };
+  function send(cmd) {
+    if (!client.connected) { setAck("bad", "Trang chưa kết nối broker nên chưa gửi được lệnh " + cmd + "."); return; }
+    client.publish(TOPIC_CMD, cmd, { qos: 0, retain: false });
+    pending = { cmd, at: Date.now(), check: CHECK[cmd] };
+    setAck("wait", "Đã gửi lệnh " + cmd + ", đang chờ ESP32 xác nhận...");
+  }
+  $("pumpOff").addEventListener("click", () => send("pump_off"));
+  $("pump50").addEventListener("click", () => send("pump_50"));
+  $("pump100").addEventListener("click", () => send("pump_on"));
+  $("valveBtn").addEventListener("click", () => send(state.valve ? "valve_off" : "valve_on"));
+  $("autoBtn").addEventListener("click", () => send("auto"));
+
+  setInterval(() => {
+    if (pending) {
+      const s = (Date.now() - pending.at) / 1000;
+      if (s > 10) { setAck("bad", "ESP32 không phản hồi lệnh " + pending.cmd + " sau 10 giây. Xem Serial có dòng Nhan lenh không, và ESP32 còn kết nối broker không."); pending = null; }
+      else if (s > 2) setAck("wait", "Đang chờ ESP32 làm theo lệnh " + pending.cmd + "... đã " + s.toFixed(0) + " giây.");
+    }
+    if (lastMsg && Date.now() - lastMsg > 5000) {
+      $("action").dataset.kind = "none";
+      $("actionTitle").textContent = "Mất dữ liệu từ ESP32";
+      $("actionSub").textContent = "Hơn 5 giây không có bản tin mới. Kiểm tra mạch đang chạy và WiFi của ESP32.";
+    }
+  }, 1000);
+</script>
+</body>
+</html>
